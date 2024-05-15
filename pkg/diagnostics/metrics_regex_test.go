@@ -31,7 +31,7 @@ func TestRegexRulesSingle(t *testing.T) {
 				},
 			},
 		},
-	}, false)
+	}, false, false)
 
 	t.Run("single regex rule applied", func(t *testing.T) {
 		view.Register(

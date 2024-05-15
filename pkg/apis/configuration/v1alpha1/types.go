@@ -222,6 +222,12 @@ type MetricHTTP struct {
 	// If false (the default), metrics for the HTTP server are collected with increased cardinality.
 	// +optional
 	IncreasedCardinality *bool `json:"increasedCardinality,omitempty"`
+
+	// If true, replaces identifiers in the URL path with a placeholder.
+	// +optional
+	// TODO(@nelson-parente): find a better name for this
+	// TODO(@nelson-parente): do not forget to gen zz_generated.deepcopy
+	ReplaceIdentifiers *bool `json:"replaceIdentifiers,omitempty"`
 }
 
 // MetricsRule defines configuration options for a metric.

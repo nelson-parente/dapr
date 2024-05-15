@@ -14,6 +14,7 @@ limitations under the License.
 package diagnostics
 
 import (
+	"regexp"
 	"strings"
 )
 
@@ -23,6 +24,11 @@ import (
 func (h *httpMetrics) convertPathToMetricLabel(path string) string {
 	if path == "" {
 		return path
+	}
+
+	// TODO(nelson-parente): This should be configurable
+	if h.replaceIdentifiers {
+		path = removeCardinality(path)
 	}
 
 	p := path
@@ -88,4 +94,25 @@ func (h *httpMetrics) convertPathToMetricLabel(path string) string {
 	}
 
 	return path
+}
+
+// TODO: @nelson-parente check preserve versions?
+func removeCardinality(path string) string {
+	// Regular expressions to identify emails, numbers, and UUIDs
+	emailRegex := regexp.MustCompile(`[\w._%+-]+@[\w.-]+\.[a-zA-Z]{2,}`)
+	numberRegex := regexp.MustCompile(`\b\d+\b`)
+	uuidRegex := regexp.MustCompile(`\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b`)
+
+	// Replace emails, numbers, and UUIDs with placeholder strings
+	cleanedPath := emailRegex.ReplaceAllStringFunc(path, func(email string) string {
+		return strings.ReplaceAll(email, email, "EMAIL")
+	})
+	cleanedPath = numberRegex.ReplaceAllStringFunc(cleanedPath, func(number string) string {
+		return strings.ReplaceAll(number, number, "NUMBER")
+	})
+	cleanedPath = uuidRegex.ReplaceAllStringFunc(cleanedPath, func(uuid string) string {
+		return strings.ReplaceAll(uuid, uuid, "UUID")
+	})
+
+	return cleanedPath
 }

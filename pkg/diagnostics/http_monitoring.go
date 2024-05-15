@@ -26,6 +26,7 @@ import (
 	"github.com/dapr/dapr/pkg/api/http/endpoints"
 	diagUtils "github.com/dapr/dapr/pkg/diagnostics/utils"
 	"github.com/dapr/dapr/pkg/responsewriter"
+	"github.com/dapr/kit/logger"
 )
 
 // To track the metrics for fasthttp using opencensus, this implementation is inspired by
@@ -36,6 +37,7 @@ var (
 	httpStatusCodeKey = tag.MustNewKey("status")
 	httpPathKey       = tag.MustNewKey("path")
 	httpMethodKey     = tag.MustNewKey("method")
+	log               = logger.NewLogger("dapr.runtime.diagnostics")
 )
 
 var (
@@ -56,14 +58,17 @@ type httpMetrics struct {
 	clientRoundtripLatency *stats.Float64Measure
 	clientCompletedCount   *stats.Int64Measure
 
-	healthProbeCompletedCount  *stats.Int64Measure
-	healthProbeRoundripLatency *stats.Float64Measure
+	healthProbeCompletedCount   *stats.Int64Measure
+	healthProbeRoundTripLatency *stats.Float64Measure
 
 	appID   string
 	enabled bool
 
 	// Enable legacy metrics, which includes the full path
 	legacy bool
+
+	// Enable replacing identifiers in the path
+	replaceIdentifiers bool
 }
 
 func newHTTPMetrics() *httpMetrics {
@@ -108,7 +113,7 @@ func newHTTPMetrics() *httpMetrics {
 			"http/healthprobes/completed_count",
 			"Count of completed health probes",
 			stats.UnitDimensionless),
-		healthProbeRoundripLatency: stats.Float64(
+		healthProbeRoundTripLatency: stats.Float64(
 			"http/healthprobes/roundtrip_latency",
 			"Time between first byte of health probes headers sent to last byte of response received, or terminal error",
 			stats.UnitMilliseconds),
@@ -126,6 +131,8 @@ func (h *httpMetrics) ServerRequestCompleted(ctx context.Context, method, path, 
 		return
 	}
 
+	log.Infof("!! method: %s, path: %s, status: %s, reqContentSize: %d, resContentSize: %d, elapsed: %f", method, path, status, reqContentSize, resContentSize, elapsed)
+
 	if h.legacy {
 		stats.RecordWithTags(
 			ctx,
@@ -140,14 +147,18 @@ func (h *httpMetrics) ServerRequestCompleted(ctx context.Context, method, path, 
 			diagUtils.WithTags(h.serverResponseCount.Name(), appIDKey, h.appID, httpPathKey, path, httpMethodKey, method, httpStatusCodeKey, status),
 			h.serverResponseCount.M(1))
 	} else {
+		log.Info("!! metrics in non legacy mode !!")
+
 		stats.RecordWithTags(
 			ctx,
-			diagUtils.WithTags(h.serverRequestCount.Name(), appIDKey, h.appID, httpMethodKey, method, httpStatusCodeKey, status),
+			diagUtils.WithTags(h.serverRequestCount.Name(), appIDKey, h.appID, httpMethodKey, method, httpPathKey, path, httpStatusCodeKey, status),
 			h.serverRequestCount.M(1))
 		stats.RecordWithTags(
 			ctx,
-			diagUtils.WithTags(h.serverLatency.Name(), appIDKey, h.appID, httpMethodKey, method, httpStatusCodeKey, status),
+			diagUtils.WithTags(h.serverLatency.Name(), appIDKey, h.appID, httpMethodKey, httpPathKey, path, method, httpStatusCodeKey, status),
 			h.serverLatency.M(elapsed))
+
+		// TODO: @nelson-parente do we want to add serverResponseCount for non-legacy mode again?
 	}
 	stats.RecordWithTags(
 		ctx, diagUtils.WithTags(h.serverRequestBytes.Name(), appIDKey, h.appID),
@@ -223,14 +234,15 @@ func (h *httpMetrics) AppHealthProbeCompleted(ctx context.Context, status string
 		h.healthProbeCompletedCount.M(1))
 	stats.RecordWithTags(
 		ctx,
-		diagUtils.WithTags(h.healthProbeRoundripLatency.Name(), appIDKey, h.appID, httpStatusCodeKey, status),
-		h.healthProbeRoundripLatency.M(elapsed))
+		diagUtils.WithTags(h.healthProbeRoundTripLatency.Name(), appIDKey, h.appID, httpStatusCodeKey, status),
+		h.healthProbeRoundTripLatency.M(elapsed))
 }
 
-func (h *httpMetrics) Init(appID string, legacy bool) error {
+func (h *httpMetrics) Init(appID string, legacy, replaceIdentifiers bool) error {
 	h.appID = appID
 	h.enabled = true
 	h.legacy = legacy
+	h.replaceIdentifiers = replaceIdentifiers
 
 	tags := []tag.Key{appIDKey}
 
@@ -253,7 +265,7 @@ func (h *httpMetrics) Init(appID string, legacy bool) error {
 		diagUtils.NewMeasureView(h.clientReceivedBytes, tags, defaultSizeDistribution),
 		diagUtils.NewMeasureView(h.clientRoundtripLatency, clientTags, defaultLatencyDistribution),
 		diagUtils.NewMeasureView(h.clientCompletedCount, clientTags, view.Count()),
-		diagUtils.NewMeasureView(h.healthProbeRoundripLatency, []tag.Key{appIDKey, httpStatusCodeKey}, defaultLatencyDistribution),
+		diagUtils.NewMeasureView(h.healthProbeRoundTripLatency, []tag.Key{appIDKey, httpStatusCodeKey}, defaultLatencyDistribution),
 		diagUtils.NewMeasureView(h.healthProbeCompletedCount, []tag.Key{appIDKey, httpStatusCodeKey}, view.Count()),
 	}
 
@@ -275,10 +287,13 @@ func (h *httpMetrics) HTTPMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
+		// TODO: @nelson-parente both low/high cardinality will have the path
+		// we will just need to reduce the cardinality there for the emails/numbers/uuids
 		var path string
-		if h.legacy {
-			path = h.convertPathToMetricLabel(r.URL.Path)
-		}
+		// if h.legacy {
+		// TODO: @nelson-parente we should remove cardinality from the path here
+		path = h.convertPathToMetricLabel(r.URL.Path)
+		// }
 
 		// Wrap the writer in a ResponseWriter so we can collect stats such as status code and size
 		rw := responsewriter.EnsureResponseWriter(w)
@@ -291,6 +306,7 @@ func (h *httpMetrics) HTTPMiddleware(next http.Handler) http.Handler {
 		status := strconv.Itoa(rw.Status())
 		respSize := int64(rw.Size())
 
+		// TODO: @nelson-parente what does this do?
 		var method string
 		if h.legacy {
 			method = r.Method

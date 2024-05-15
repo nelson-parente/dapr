@@ -32,7 +32,6 @@ import (
 	env "github.com/dapr/dapr/pkg/config/env"
 	operatorv1pb "github.com/dapr/dapr/pkg/proto/operator/v1"
 	"github.com/dapr/dapr/utils"
-	"github.com/dapr/kit/logger"
 	"github.com/dapr/kit/ptr"
 )
 
@@ -261,18 +260,31 @@ func (m MetricSpec) GetEnabled() bool {
 }
 
 // GetHTTPIncreasedCardinality returns true if increased cardinality is enabled for HTTP metrics
-func (m MetricSpec) GetHTTPIncreasedCardinality(log logger.Logger) bool {
+func (m MetricSpec) GetHTTPIncreasedCardinality() bool {
 	if m.HTTP == nil || m.HTTP.IncreasedCardinality == nil {
 		// The default is false
-		return false
+		return true // TODO: @nelson changed this
 	}
 	return *m.HTTP.IncreasedCardinality
+}
+
+// GetHTTPReplaceIdentifiers returns true if the path should be replaced with the route name in HTTP metrics
+func (m MetricSpec) GetHTTPReplaceIdentifiers() bool {
+	if m.HTTP == nil || m.HTTP.ReplaceIdentifiers == nil {
+		// The default is false
+		return true
+	}
+	return *m.HTTP.ReplaceIdentifiers
 }
 
 // MetricHTTP defines configuration for metrics for the HTTP server
 type MetricHTTP struct {
 	// If false (the default), metrics for the HTTP server are collected with increased cardinality.
 	IncreasedCardinality *bool `json:"increasedCardinality,omitempty" yaml:"increasedCardinality,omitempty"`
+
+	// If true, replaces the path in the metric name with the route name.
+	// TODO(@nelson-parente): find a better name for this
+	ReplaceIdentifiers *bool `json:"replaceIdentifiers,omitempty"`
 }
 
 // MetricsRu le defines configuration options for a metric.

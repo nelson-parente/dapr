@@ -52,6 +52,8 @@ var (
 )
 
 func Run() {
+	log.Info("!! NELSON !!")
+
 	// set GOMAXPROCS
 	_, _ = maxprocs.Set()
 
